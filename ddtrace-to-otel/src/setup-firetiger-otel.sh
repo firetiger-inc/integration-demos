@@ -248,6 +248,9 @@ echo "Authorization: Basic ${AUTHORIZATION}"
 # Generate OpenTelemetry Collector configuration
 print_info "Generating OpenTelemetry Collector configuration..."
 
+# Create generated directory if it doesn't exist
+mkdir -p ../generated
+
 cat > ../generated/otel-config.yaml << EOF
 receivers:
   # Receive traces from DDTrace on port 8126 (DataDog agent port)
