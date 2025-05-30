@@ -17,15 +17,15 @@ DDTrace App → localhost:8125 → [DataDog Agent OR OTEL Collector] → [DataDo
 
 This demo includes three test scenarios to validate whether OTEL collector interferes with DataDog metrics:
 
-### Scenario 1: Traces to OTEL, Metrics to DataDog (Production Recommended)
-- **Traces**: DDTrace → OTEL Collector (port 8126) → Firetiger
-- **Metrics**: DogStatsD → DataDog Agent (port 8125) → DataDog
-- **Result**: No interference - metrics flow directly to DataDog
+### Scenario 1: DataDog APM Traces to OTEL, statsd Metrics to DataDog
+- **Traces**: DDTrace → OTEL Collector (TCP port 8126) → Firetiger
+- **Metrics**: DogStatsD → DataDog Agent (UDP port 8125) → DataDog
+- **Result**: Traces go to otel collector, metrics flow directly to DataDog
 
-### Scenario 2: Traces and Metrics to OTEL (Interference Testing)
-- **Traces**: DDTrace → OTEL Collector (port 8126) → Firetiger  
-- **Metrics**: DogStatsD → OTEL Collector (port 8125) → Firetiger
-- **Result**: OTEL collector intercepts metrics - validates the interference concern
+### Scenario 2: Traces and Metrics to OTEL
+- **Traces**: DDTrace → OTEL Collector (TCP port 8126) → Firetiger  
+- **Metrics**: DogStatsD → OTEL Collector (UDP port 8125) → Firetiger
+- **Result**: OTEL collector collects traces and metrics
 
 ## Files
 
@@ -122,15 +122,15 @@ Look for:
 | `traces-to-otel-metrics-to-dd` | ✅ OTEL Collector → Firetiger | ✅ DataDog Agent (UDP listener) | ✅ **"METRIC RECEIVED:" in agent logs** |
 | `traces-and-metrics-to-otel` | ✅ OTEL Collector → Firetiger | ❌ OTEL Collector → Firetiger | ❌ **Metrics in OTEL collector logs** |
 
-### 🎯 Acceptance Criteria
+### 🎯 Acceptance Criteria for traces-to-otel-metrics-to-dd
 
-**SUCCESS (No Interference):**
+**SUCCESS:**
 ```bash
 docker-compose logs datadog-agent | grep "METRIC RECEIVED:"
 # Should show: [DataDog Agent Sim] METRIC RECEIVED: webapp.app.started:1|c|#env:demo...
 ```
 
-**FAILURE (Interference Detected):**
+**FAILURE (metrics no longer being received by DD):**
 ```bash
 docker-compose logs otel-collector | grep -i metric
 # Should show metrics being processed by OTEL collector instead of DataDog agent
@@ -139,8 +139,8 @@ docker-compose logs otel-collector | grep -i metric
 ## Key Points
 
 - **No Code Changes**: DDTrace app runs unchanged with `ddtrace-run python app.py`
-- **Port 8126**: DDTrace sends traces to localhost:8126 (standard DataDog agent port)  
-- **Port 8125**: DogStatsD sends metrics to localhost:8125 (configurable destination)
+- **TCP Port 8126**: DDTrace sends traces to localhost:8126 (standard DataDog agent port)  
+- **UDP Port 8125**: DogStatsD sends metrics to localhost:8125 (configurable destination)
 - **DataDog Receiver**: OTel collector receives and converts DD traces to OpenTelemetry format
 - **Metrics Validation**: Application includes DogStatsD metrics to test delivery paths
 - **Zero OTLP Dependencies**: Application has no OpenTelemetry imports or configuration
