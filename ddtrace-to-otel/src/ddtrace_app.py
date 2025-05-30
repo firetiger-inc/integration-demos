@@ -15,10 +15,14 @@ import logging
 import threading
 import uuid
 import argparse
+import os
 
 # Pure ddtrace imports - no OpenTelemetry dependencies
 from ddtrace import tracer
 from ddtrace.ext import http, db
+
+# DataDog metrics (DogStatsD)
+from datadog import initialize, statsd
 
 # Set up logging
 logging.basicConfig(
@@ -64,12 +68,59 @@ class WebAppSimulator:
             "version": "1.0.0"
         })
         
+        # Initialize DogStatsD for metrics
+        dogstatsd_host = os.getenv('DD_DOGSTATSD_HOST', 'localhost')
+        dogstatsd_port = int(os.getenv('DD_DOGSTATSD_PORT', '8125'))
+        
+        initialize(
+            statsd_host=dogstatsd_host,
+            statsd_port=dogstatsd_port,
+            statsd_namespace='webapp'
+        )
+        
         logger.info("Initialized DDTrace web application simulator")
         logger.info("DDTrace will send traces to localhost:8126 (DataDog agent port)")
+        logger.info(f"DogStatsD will send metrics to {dogstatsd_host}:{dogstatsd_port}")
+        
+        # Validate metrics configuration
+        if dogstatsd_host == 'otel-collector':
+            logger.warning("⚠️  METRICS ROUTING: DogStatsD configured to send to OTEL collector")
+            logger.warning("⚠️  This may interfere with DataDog metrics if OTEL collector is listening on port 8125")
+        elif dogstatsd_host == 'datadog-agent':
+            logger.info("✅ METRICS ROUTING: DogStatsD configured to send directly to DataDog agent")
+        else:
+            logger.info(f"ℹ️  METRICS ROUTING: DogStatsD configured to send to custom host: {dogstatsd_host}")
+        
+        # Send initialization metrics with routing information
+        statsd.increment('app.started', tags=[
+            'env:demo', 
+            'version:1.0.0', 
+            f'metrics_host:{dogstatsd_host}',
+            f'metrics_port:{dogstatsd_port}'
+        ])
+        
+        # Send a test metric to validate the delivery path
+        statsd.gauge('app.metrics_test.connectivity', 1, tags=[
+            'test_type:connectivity',
+            f'target_host:{dogstatsd_host}',
+            f'target_port:{dogstatsd_port}'
+        ])
+        
+        # Store configuration for later validation
+        self.dogstatsd_host = dogstatsd_host
+        self.dogstatsd_port = dogstatsd_port
     
     def simulate_database_operation(self, operation, table, duration_ms=None):
         """Simulate a database operation with ddtrace"""
         duration = duration_ms or random.uniform(10, 100)
+        
+        # Metrics: Start timer and increment counter
+        timer_start = time.time()
+        statsd.increment('database.operations.total', tags=[
+            f'operation:{operation.lower()}', 
+            f'table:{table}', 
+            'service:postgresql'
+        ])
         
         with tracer.trace("database.query", service="postgresql") as span:
             span.set_tag("db.system", "postgresql")
@@ -82,19 +133,51 @@ class WebAppSimulator:
             # Simulate processing time
             time.sleep(duration / 1000.0)
             
+            # Metrics: Record duration
+            duration_actual = (time.time() - timer_start) * 1000
+            statsd.histogram('database.operations.duration', duration_actual, tags=[
+                f'operation:{operation.lower()}', 
+                f'table:{table}', 
+                'service:postgresql'
+            ])
+            
             # Occasionally simulate database errors
             if random.random() < 0.02:  # 2% error rate
                 span.set_tag("error.msg", "Connection timeout")
                 span.set_tag("error.type", "DatabaseError")
                 span.error = 1
+                
+                # Metrics: Record error
+                statsd.increment('database.operations.errors', tags=[
+                    f'operation:{operation.lower()}', 
+                    f'table:{table}', 
+                    'error_type:timeout',
+                    'service:postgresql'
+                ])
+                
                 logger.warning(f"Database error for {operation} on {table}")
                 raise Exception("Database connection timeout")
+            
+            # Metrics: Record success
+            statsd.increment('database.operations.success', tags=[
+                f'operation:{operation.lower()}', 
+                f'table:{table}', 
+                'service:postgresql'
+            ])
             
             return f"DB {operation} completed"
     
     def simulate_http_request(self, service, endpoint, method="GET"):
         """Simulate an HTTP request to another service"""
         duration = random.uniform(50, 300)
+        
+        # Metrics: Start timer and increment counter
+        timer_start = time.time()
+        statsd.increment('http.requests.total', tags=[
+            f'service:{service}', 
+            f'method:{method}', 
+            'direction:outbound'
+        ])
         
         with tracer.trace("http.request", service=service) as span:
             span.set_tag(http.METHOD, method)
@@ -105,17 +188,43 @@ class WebAppSimulator:
             # Simulate processing time
             time.sleep(duration / 1000.0)
             
+            # Metrics: Record duration
+            duration_actual = (time.time() - timer_start) * 1000
+            statsd.histogram('http.requests.duration', duration_actual, tags=[
+                f'service:{service}', 
+                f'method:{method}', 
+                'direction:outbound'
+            ])
+            
             # Occasionally simulate HTTP errors
             if random.random() < 0.05:  # 5% error rate
                 status_code = random.choice([500, 502, 503, 504])
                 span.set_tag(http.STATUS_CODE, status_code)
                 span.set_tag("error.msg", f"HTTP {status_code} error")
                 span.error = 1
+                
+                # Metrics: Record error
+                statsd.increment('http.requests.errors', tags=[
+                    f'service:{service}', 
+                    f'method:{method}', 
+                    f'status_code:{status_code}',
+                    'direction:outbound'
+                ])
+                
                 logger.warning(f"HTTP error {status_code} calling {service}")
                 return status_code
             else:
                 status_code = random.choice([200, 201, 204])
                 span.set_tag(http.STATUS_CODE, status_code)
+                
+                # Metrics: Record success
+                statsd.increment('http.requests.success', tags=[
+                    f'service:{service}', 
+                    f'method:{method}', 
+                    f'status_code:{status_code}',
+                    'direction:outbound'
+                ])
+                
                 return status_code
     
     def simulate_cache_operation(self, operation, key):
@@ -165,6 +274,14 @@ class WebAppSimulator:
         """Process a complete user request through multiple services"""
         request_id = uuid.uuid4().hex[:8]
         
+        # Metrics: Start timer and increment request counter
+        timer_start = time.time()
+        statsd.increment('web.requests.total', tags=[
+            f'endpoint:{endpoint}', 
+            f'method:{method}', 
+            'service:webapp'
+        ])
+        
         with tracer.trace("web.request", service="webapp") as root_span:
             root_span.set_tag("user.id", user_id)
             root_span.set_tag("request.id", request_id)
@@ -183,6 +300,23 @@ class WebAppSimulator:
                         auth_span.set_tag("error.msg", "Invalid token")
                         auth_span.error = 1
                         root_span.set_tag(http.STATUS_CODE, 401)
+                        
+                        # Metrics: Record auth failure
+                        duration_actual = (time.time() - timer_start) * 1000
+                        statsd.histogram('web.requests.duration', duration_actual, tags=[
+                            f'endpoint:{endpoint}', 
+                            f'method:{method}', 
+                            'status_code:401',
+                            'service:webapp'
+                        ])
+                        statsd.increment('web.requests.errors', tags=[
+                            f'endpoint:{endpoint}', 
+                            f'method:{method}', 
+                            'status_code:401',
+                            'error_type:auth_failure',
+                            'service:webapp'
+                        ])
+                        
                         return 401
                 
                 # Determine service and dependencies
@@ -223,11 +357,44 @@ class WebAppSimulator:
                             business_span.set_tag("error.msg", str(e))
                             business_span.error = 1
                             root_span.set_tag(http.STATUS_CODE, 500)
+                            
+                            # Metrics: Record dependency failure
+                            duration_actual = (time.time() - timer_start) * 1000
+                            statsd.histogram('web.requests.duration', duration_actual, tags=[
+                                f'endpoint:{endpoint}', 
+                                f'method:{method}', 
+                                'status_code:500',
+                                'service:webapp'
+                            ])
+                            statsd.increment('web.requests.errors', tags=[
+                                f'endpoint:{endpoint}', 
+                                f'method:{method}', 
+                                'status_code:500',
+                                'error_type:dependency_failure',
+                                'service:webapp'
+                            ])
+                            
                             return 500
                 
                 # Success
                 status_code = 200 if method == "GET" else 201
                 root_span.set_tag(http.STATUS_CODE, status_code)
+                
+                # Metrics: Record successful request
+                duration_actual = (time.time() - timer_start) * 1000
+                statsd.histogram('web.requests.duration', duration_actual, tags=[
+                    f'endpoint:{endpoint}', 
+                    f'method:{method}', 
+                    f'status_code:{status_code}',
+                    'service:webapp'
+                ])
+                statsd.increment('web.requests.success', tags=[
+                    f'endpoint:{endpoint}', 
+                    f'method:{method}', 
+                    f'status_code:{status_code}',
+                    'service:webapp'
+                ])
+                
                 return status_code
                 
             except Exception as e:
@@ -235,6 +402,23 @@ class WebAppSimulator:
                 root_span.set_tag("error.type", type(e).__name__)
                 root_span.error = 1
                 root_span.set_tag(http.STATUS_CODE, 500)
+                
+                # Metrics: Record error request
+                duration_actual = (time.time() - timer_start) * 1000
+                statsd.histogram('web.requests.duration', duration_actual, tags=[
+                    f'endpoint:{endpoint}', 
+                    f'method:{method}', 
+                    'status_code:500',
+                    'service:webapp'
+                ])
+                statsd.increment('web.requests.errors', tags=[
+                    f'endpoint:{endpoint}', 
+                    f'method:{method}', 
+                    'status_code:500',
+                    'error_type:internal_error',
+                    'service:webapp'
+                ])
+                
                 return 500
     
     def get_service_for_endpoint(self, endpoint):
@@ -291,6 +475,38 @@ class WebAppSimulator:
         
         logger.info(f"Worker {worker_id}: {successful_requests}/{num_requests} successful, {error_requests} errors")
     
+    def send_validation_metrics(self):
+        """Send periodic validation metrics to test delivery paths"""
+        while True:
+            try:
+                # Send heartbeat metric
+                statsd.gauge('app.metrics_test.heartbeat', 1, tags=[
+                    f'target_host:{self.dogstatsd_host}',
+                    f'target_port:{self.dogstatsd_port}',
+                    'test_type:heartbeat'
+                ])
+                
+                # Send timestamp metric to verify delivery
+                statsd.gauge('app.metrics_test.timestamp', int(time.time()), tags=[
+                    f'target_host:{self.dogstatsd_host}',
+                    f'target_port:{self.dogstatsd_port}',
+                    'test_type:timestamp'
+                ])
+                
+                # Send counter that should increment
+                statsd.increment('app.metrics_test.counter', tags=[
+                    f'target_host:{self.dogstatsd_host}',
+                    f'target_port:{self.dogstatsd_port}',
+                    'test_type:counter'
+                ])
+                
+                logger.debug(f"Sent validation metrics to {self.dogstatsd_host}:{self.dogstatsd_port}")
+                time.sleep(30)  # Send validation metrics every 30 seconds
+                
+            except Exception as e:
+                logger.error(f"Error sending validation metrics: {e}")
+                time.sleep(30)
+
     def run_simulation(self, num_requests=100, num_workers=5, interval_ms=100, user_count=50):
         """Run the trace generation simulation"""
         interval_seconds = interval_ms / 1000.0
@@ -298,6 +514,14 @@ class WebAppSimulator:
         logger.info(f"Starting DDTrace simulation with {num_workers} workers")
         logger.info(f"Generating {num_requests} requests per worker, interval: {interval_ms}ms")
         logger.info(f"Simulating {user_count} users across {len(self.ENDPOINTS)} endpoints")
+        
+        # Start validation metrics thread
+        validation_thread = threading.Thread(
+            target=self.send_validation_metrics,
+            daemon=True
+        )
+        validation_thread.start()
+        logger.info(f"Started validation metrics thread (sending to {self.dogstatsd_host}:{self.dogstatsd_port})")
         
         threads = []
         for worker_id in range(num_workers):
@@ -312,6 +536,15 @@ class WebAppSimulator:
             thread.join()
         
         logger.info("DDTrace simulation completed")
+        
+        # Send final summary metrics
+        statsd.increment('app.simulation.completed', tags=[
+            f'target_host:{self.dogstatsd_host}',
+            f'target_port:{self.dogstatsd_port}',
+            f'workers:{num_workers}',
+            f'requests_per_worker:{num_requests}'
+        ])
+        
         time.sleep(1)  # Allow final traces to be sent
 
 def main():

@@ -1,18 +1,35 @@
-version: '3.8'
-
 services:
-  # OpenTelemetry Collector
+  # OpenTelemetry Collector - Traces Only
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector
     ports:
-      - "8126:8126"   # DataDog receiver (primary port for DDTrace)
+      - "8126:8126"   # DataDog receiver (traces)
     volumes:
-      - ../generated/otel-config.yaml:/etc/otelcol-contrib/otel-config.yaml
+      # Use environment variable to choose config file
+      # Set SCENARIO=traces-only (default) or SCENARIO=traces-and-metrics
+      - ../generated/otel-config-${SCENARIO:-traces-only}.yaml:/etc/otelcol-contrib/otel-config.yaml
     command: ["--config=/etc/otelcol-contrib/otel-config.yaml"]
     restart: unless-stopped
+    profiles:
+      - default
+      - traces-to-otel-metrics-to-dd
 
-  # DDTrace Application
+  # OpenTelemetry Collector - Traces AND Metrics (for interference testing)
+  otel-collector-with-metrics:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "8126:8126"   # DataDog receiver (traces)
+      - "8125:8125/udp"   # StatsD receiver (metrics) - INTERFERENCE TEST
+    volumes:
+      - ../generated/otel-config-${SCENARIO:-traces-and-metrics}.yaml:/etc/otelcol-contrib/otel-config.yaml
+    command: ["--config=/etc/otelcol-contrib/otel-config.yaml"]
+    restart: unless-stopped
+    profiles:
+      - traces-and-metrics-to-otel
+
+  # DDTrace Application - Traces Only
   ddtrace-app:
     build:
       context: .
@@ -28,6 +45,11 @@ services:
       # Point DDTrace to the collector container
       - DD_AGENT_HOST=otel-collector
       - DD_TRACE_AGENT_PORT=8126
+      # DogStatsD configuration - control where metrics go
+      # Set to 'otel-collector' to send metrics through OTEL (testing interference)
+      # Set to 'datadog-agent' to send metrics directly to DataDog (normal flow)
+      - DD_DOGSTATSD_HOST=${DOGSTATSD_HOST:-otel-collector}
+      - DD_DOGSTATSD_PORT=${DOGSTATSD_PORT:-8125}
     volumes:
       - ../generated/.env:/app/.env
     command: >
@@ -36,3 +58,51 @@ services:
       --workers 3 
       --interval 500ms 
       --users 25
+    profiles:
+      - traces-to-otel-metrics-to-dd
+
+  # DDTrace Application - Traces and Metrics
+  ddtrace-app-with-metrics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ddtrace-app
+    depends_on:
+      - otel-collector-with-metrics
+    environment:
+      # DDTrace configuration - sends to localhost:8126 by default
+      - DD_SERVICE=ddtrace-webapp
+      - DD_ENV=demo
+      - DD_VERSION=1.0.0
+      # Point DDTrace to the collector container
+      - DD_AGENT_HOST=otel-collector
+      - DD_TRACE_AGENT_PORT=8126
+      # DogStatsD configuration - control where metrics go
+      # Set to 'otel-collector' to send metrics through OTEL (testing interference)
+      # Set to 'datadog-agent' to send metrics directly to DataDog (normal flow)
+      - DD_DOGSTATSD_HOST=${DOGSTATSD_HOST:-otel-collector}
+      - DD_DOGSTATSD_PORT=${DOGSTATSD_PORT:-8125}
+    volumes:
+      - ../generated/.env:/app/.env
+    command: >
+      ddtrace-run python ddtrace_app.py 
+      --requests 100 
+      --workers 3 
+      --interval 500ms 
+      --users 25
+    profiles:
+      - traces-and-metrics-to-otel
+
+  # Simulated DataDog Agent (UDP StatsD listener)
+  # In production, this would be the real DataDog agent
+  datadog-agent:
+    image: alpine:latest
+    container_name: datadog-agent
+    ports:
+      - "8125:8125/udp"   # Simulate DataDog agent listening on 8125
+    volumes:
+      - ./statsd-listener.sh:/usr/local/bin/statsd-listener.sh:ro
+    command: ["sh", "/usr/local/bin/statsd-listener.sh"]
+    restart: unless-stopped
+    profiles:
+      - traces-to-otel-metrics-to-dd  # DataDog agent receives metrics in this scenario
