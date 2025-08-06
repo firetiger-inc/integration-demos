@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataDog Browser SDK Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .config {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        .btn-info { background: #17a2b8; color: white; }
+        .btn-warn { background: #ffc107; color: black; }
+        .btn-error { background: #dc3545; color: white; }
+        .btn-debug { background: #6c757d; color: white; }
+        .btn-info:hover { background: #138496; }
+        .btn-warn:hover { background: #e0a800; }
+        .btn-error:hover { background: #c82333; }
+        .btn-debug:hover { background: #545b62; }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .log-info { background: #d1ecf1; color: #0c5460; }
+        .log-warn { background: #fff3cd; color: #856404; }
+        .log-error { background: #f8d7da; color: #721c24; }
+        .log-debug { background: #e2e3e5; color: #383d41; }
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .status.direct { background: #d4edda; color: #155724; }
+        .status.proxy { background: #cce7ff; color: #004085; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 DataDog Browser SDK Demo</h1>
+        <p>This demonstrates the DataDog Browser Logs SDK working in a real browser environment, simulating browser extension telemetry.</p>
+        
+        <div class="config">
+            <strong>Configuration:</strong><br>
+            <span id="config-info">Loading...</span>
+        </div>
+        
+        <div id="status" class="status">
+            <span id="status-text">Initializing...</span>
+        </div>
+        
+        <div class="controls">
+            <button class="btn-info" onclick="sendLog('info', 'User clicked extension icon', {action: 'icon_click'})">
+                📱 Extension Icon Click
+            </button>
+            <button class="btn-info" onclick="sendLog('info', 'User captured page screenshot', {action: 'screenshot', url: window.location.href})">
+                📸 Page Screenshot
+            </button>
+            <button class="btn-info" onclick="sendLog('info', 'User submitted bug report', {action: 'bug_report', reportId: 'bug_' + Date.now()})">
+                🐛 Bug Report
+            </button>
+            <button class="btn-warn" onclick="sendLog('warn', 'Slow performance detected in extension', {loadTime: Math.floor(Math.random() * 3000) + 1000, component: 'content-script'})">
+                ⚡ Performance Warning
+            </button>
+            <button class="btn-error" onclick="sendLog('error', 'Network request failed in content script', {errorCode: 'NETWORK_ERROR', endpoint: 'https://api.example.com/data'})">
+                🌐 Network Error
+            </button>
+            <button class="btn-debug" onclick="sendLog('debug', 'Extension state changed', {state: 'active', tabId: Math.floor(Math.random() * 10) + 1})">
+                🔍 Debug Info
+            </button>
+        </div>
+        
+        <button onclick="simulateError()" style="width: 100%; padding: 15px; background: #fd7e14; color: white; border: none; border-radius: 5px; margin: 10px 0; cursor: pointer;">
+            💥 Simulate JavaScript Error
+        </button>
+        
+        <button onclick="toggleMode()" id="mode-toggle" style="width: 100%; padding: 15px; background: #6f42c1; color: white; border: none; border-radius: 5px; margin: 10px 0; cursor: pointer;">
+            🔄 Switch to Proxy Mode
+        </button>
+        
+        <div class="log-output">
+            <strong>Console Output:</strong>
+            <div id="console-output"></div>
+        </div>
+    </div>
+
+    <script src="https://www.datadoghq-browser-agent.com/us5/v5/datadog-logs.js"></script>
+    <script>
+        // Configuration from environment variables (injected server-side)
+        const config = {
+            clientToken: '{{DD_CLIENT_TOKEN}}',
+            site: '{{DD_SITE}}',
+            service: '{{DD_SERVICE}}',
+            env: '{{DD_ENV}}',
+            version: '{{DD_VERSION}}',
+            forwardErrorsToLogs: true,
+            sessionSampleRate: 100
+        };
+        
+        const proxyEndpoint = '{{PROXY_ENDPOINT}}';
+        let currentMode = 'direct';
+        let sessionId = 'session_' + Math.random().toString(36).substring(2, 15);
+        
+        function addToConsole(level, message) {
+            const output = document.getElementById('console-output');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${level}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${level.toUpperCase()}: ${message}`;
+            output.appendChild(entry);
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function initializeDataDog(useProxy = false) {
+            const ddConfig = { ...config };
+            
+            if (useProxy) {
+                ddConfig.proxy = proxyEndpoint;
+                currentMode = 'proxy';
+                document.getElementById('status').className = 'status proxy';
+                document.getElementById('status-text').textContent = `🔄 Using Proxy Mode - Dual forwarding to DataDog + Firetiger`;
+                document.getElementById('mode-toggle').textContent = '📡 Switch to Direct Mode';
+            } else {
+                currentMode = 'direct';
+                document.getElementById('status').className = 'status direct';
+                document.getElementById('status-text').textContent = '📡 Using Direct Mode - DataDog only';
+                document.getElementById('mode-toggle').textContent = '🔄 Switch to Proxy Mode';
+            }
+            
+            // Initialize DataDog Logs
+            DD_LOGS.init(ddConfig);
+            
+            // Set global context
+            DD_LOGS.setGlobalContextProperty('sessionId', sessionId);
+            DD_LOGS.setGlobalContextProperty('userAgent', navigator.userAgent);
+            DD_LOGS.setGlobalContextProperty('extensionVersion', config.version);
+            DD_LOGS.setGlobalContextProperty('proxyMode', useProxy);
+            DD_LOGS.setGlobalContextProperty('url', window.location.href);
+            
+            addToConsole('info', `DataDog SDK initialized in ${currentMode} mode`);
+            
+            // Update config display
+            document.getElementById('config-info').innerHTML = `
+                <strong>Client Token:</strong> ${config.clientToken}<br>
+                <strong>Site:</strong> ${config.site}<br>
+                <strong>Service:</strong> ${config.service}<br>
+                <strong>Environment:</strong> ${config.env}<br>
+                <strong>Session ID:</strong> ${sessionId}<br>
+                <strong>Mode:</strong> ${currentMode.toUpperCase()}<br>
+                ${useProxy ? `<strong>Proxy:</strong> ${proxyEndpoint}` : ''}
+            `;
+        }
+        
+        function sendLog(level, message, context = {}) {
+            const logContext = {
+                ...context,
+                timestamp: Date.now(),
+                sessionDuration: Date.now() - window.loadTime,
+                pageUrl: window.location.href
+            };
+            
+            // Send via DataDog SDK
+            switch (level) {
+                case 'debug':
+                    DD_LOGS.logger.debug(message, logContext);
+                    break;
+                case 'info':
+                    DD_LOGS.logger.info(message, logContext);
+                    break;
+                case 'warn':
+                    DD_LOGS.logger.warn(message, logContext);
+                    break;
+                case 'error':
+                    DD_LOGS.logger.error(message, logContext);
+                    break;
+            }
+            
+            addToConsole(level, `${message} - Context: ${JSON.stringify(context)}`);
+        }
+        
+        function simulateError() {
+            try {
+                // Intentionally cause an error
+                throw new Error('Simulated extension error: Failed to process user action');
+            } catch (error) {
+                DD_LOGS.logger.error(error.message, {
+                    error: {
+                        stack: error.stack,
+                        name: error.name,
+                        message: error.message
+                    },
+                    action: 'simulate_error',
+                    sessionId: sessionId
+                });
+                
+                addToConsole('error', `JavaScript Error: ${error.message}`);
+            }
+        }
+        
+        function toggleMode() {
+            const useProxy = currentMode === 'direct';
+            initializeDataDog(useProxy);
+        }
+        
+        // Initialize when page loads
+        window.loadTime = Date.now();
+        
+        window.addEventListener('load', () => {
+            initializeDataDog(true); // Start in proxy mode by default
+            
+            // Send initial log
+            setTimeout(() => {
+                sendLog('info', 'Browser extension demo initialized', {
+                    startup: true,
+                    loadTime: Date.now() - window.loadTime
+                });
+            }, 1000);
+        });
+        
+        // Send a log when page is about to unload
+        window.addEventListener('beforeunload', () => {
+            sendLog('info', 'Browser extension demo closing', {
+                sessionDuration: Date.now() - window.loadTime,
+                shutdown: true
+            });
+        });
+    </script>
+</body>
+</html>
