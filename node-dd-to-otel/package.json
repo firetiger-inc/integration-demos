@@ -11,6 +11,7 @@
     "demo:dev": "node --watch server.js",
     "test": "node test-integration.js",
     "test:server": "node test-server.js",
+    "test:otel": "node test-otel-conversion.js",
     "install:all": "npm install && cd worker && npm install",
     "worker:dev": "cd worker && npm run dev",
     "worker:deploy": "cd worker && npm run deploy"

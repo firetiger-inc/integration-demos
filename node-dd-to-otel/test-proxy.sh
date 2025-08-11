@@ -9,7 +9,7 @@ DD_FORWARD_PATH="/api/v2/logs?ddsource=browser&ddtags=sdk_version%3A5.35.1%2Capi
 # URL encode the ddforward parameter
 DD_FORWARD_ENCODED=$(printf '%s' "$DD_FORWARD_PATH" | jq -sRr @uri)
 
-echo "🧪 Testing DataDog Proxy Worker"
+echo "🧪 Testing DataDog Proxy Worker with OTEL conversion"
 echo "📡 Proxy URL: $PROXY_URL"
 echo "🔗 ddforward: $DD_FORWARD_PATH"
 echo "🔗 encoded: $DD_FORWARD_ENCODED"

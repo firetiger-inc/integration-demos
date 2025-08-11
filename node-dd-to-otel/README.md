@@ -137,10 +137,28 @@ const logsEndpoint = 'https://your-worker.workers.dev/v1/input/TOKEN';
 
 The worker will:
 - ✅ Forward logs to DataDog (maintains existing functionality)
-- ✅ Forward copies to Firetiger (enables enhanced debugging)  
+- ✅ Convert and forward logs to Firetiger in OpenTelemetry format (enables enhanced debugging)  
+- ✅ Process both destinations in parallel for performance
 - ✅ Respect kill switches for operational control
 - ✅ Handle CORS for browser compatibility
 - ✅ Provide request tracing and error handling
+
+## OpenTelemetry Integration
+
+The worker automatically converts DataDog log format to OpenTelemetry format when forwarding to Firetiger:
+
+### DataDog → OTEL Conversion
+- **Timestamps**: Converted from DataDog format to OTEL `timeUnixNano`
+- **Severity Levels**: Mapped to OTEL severity numbers and text
+- **Attributes**: All DataDog context preserved as OTEL attributes with `dd.` prefix
+- **Resource Info**: Service name, version, and environment mapped to OTEL resource attributes
+- **Proxy Metadata**: Added as attributes for traceability
+
+### Test OTEL Conversion
+```bash
+# Test the conversion logic locally
+npm run test:otel
+```
 
 ## Testing
 

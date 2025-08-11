@@ -1,6 +1,12 @@
 /**
  * Cloudflare Worker proxy for DataDog telemetry
- * Forwards logs/metrics to both DataDog and Firetiger
+ * Forwards logs to DataDog (original format) and Firetiger (OTEL format)
+ * 
+ * Features:
+ * - Follows official DataDog proxy specification with ddforward parameter
+ * - Converts DataDog logs to OpenTelemetry format for Firetiger
+ * - Parallel forwarding for performance
+ * - Comprehensive error handling and logging
  */
 
 // Configuration constants - DataDog intake origins by site
@@ -255,52 +261,203 @@ async function handleMetricsRequest(request, env, ctx) {
 }
 
 /**
- * Forward logs to Firetiger
+ * Convert DataDog logs to OpenTelemetry format
+ */
+function convertDataDogToOTEL(datadogPayload, requestId) {
+  let ddLogs;
+  
+  try {
+    const parsed = JSON.parse(datadogPayload);
+    // DataDog Browser SDK sends logs in a "logs" array
+    ddLogs = parsed.logs || [parsed];
+  } catch {
+    // If parsing fails, treat as single raw log
+    ddLogs = [{
+      message: datadogPayload,
+      timestamp: Date.now(),
+      level: 'info'
+    }];
+  }
+
+  // Convert each DataDog log to OTEL log format
+  const otelLogs = ddLogs.map(ddLog => {
+    // Map DataDog severity to OTEL severity
+    const severityMap = {
+      'debug': { number: 5, text: 'DEBUG' },
+      'info': { number: 9, text: 'INFO' },
+      'warn': { number: 13, text: 'WARN' },
+      'error': { number: 17, text: 'ERROR' }
+    };
+    
+    const severity = severityMap[ddLog.level] || severityMap['info'];
+    
+    // Convert timestamp (DataDog uses various formats)
+    let timeUnixNano;
+    if (ddLog.timestamp) {
+      const timestamp = new Date(ddLog.timestamp).getTime();
+      timeUnixNano = (timestamp * 1000000).toString(); // Convert to nanoseconds
+    } else {
+      timeUnixNano = (Date.now() * 1000000).toString();
+    }
+
+    // Build OTEL log record
+    const otelLog = {
+      timeUnixNano: timeUnixNano,
+      severityNumber: severity.number,
+      severityText: severity.text,
+      body: {
+        stringValue: ddLog.message || JSON.stringify(ddLog)
+      },
+      attributes: []
+    };
+
+    // Convert DataDog attributes to OTEL attributes
+    const attributes = [];
+    
+    // Add DataDog service info as attributes
+    if (ddLog.service) {
+      attributes.push({
+        key: 'service.name',
+        value: { stringValue: ddLog.service }
+      });
+    }
+    
+    if (ddLog.env) {
+      attributes.push({
+        key: 'deployment.environment',
+        value: { stringValue: ddLog.env }
+      });
+    }
+    
+    if (ddLog.version) {
+      attributes.push({
+        key: 'service.version',
+        value: { stringValue: ddLog.version }
+      });
+    }
+
+    // Add DataDog context as attributes
+    Object.keys(ddLog).forEach(key => {
+      if (!['message', 'timestamp', 'level', 'service', 'env', 'version'].includes(key)) {
+        const value = ddLog[key];
+        if (typeof value === 'string') {
+          attributes.push({
+            key: `dd.${key}`,
+            value: { stringValue: value }
+          });
+        } else if (typeof value === 'number') {
+          attributes.push({
+            key: `dd.${key}`,
+            value: { doubleValue: value }
+          });
+        } else if (typeof value === 'boolean') {
+          attributes.push({
+            key: `dd.${key}`,
+            value: { boolValue: value }
+          });
+        } else {
+          attributes.push({
+            key: `dd.${key}`,
+            value: { stringValue: JSON.stringify(value) }
+          });
+        }
+      }
+    });
+
+    // Add proxy metadata
+    attributes.push(
+      {
+        key: 'proxy.source',
+        value: { stringValue: 'dd-proxy-worker' }
+      },
+      {
+        key: 'proxy.request_id',
+        value: { stringValue: requestId }
+      },
+      {
+        key: 'proxy.timestamp',
+        value: { stringValue: new Date().toISOString() }
+      }
+    );
+
+    otelLog.attributes = attributes;
+    return otelLog;
+  });
+
+  // Build complete OTEL payload
+  return {
+    resourceLogs: [
+      {
+        resource: {
+          attributes: [
+            {
+              key: 'service.name',
+              value: { stringValue: 'browser-extension' }
+            },
+            {
+              key: 'telemetry.sdk.name',
+              value: { stringValue: 'datadog-browser-sdk' }
+            },
+            {
+              key: 'telemetry.sdk.version',
+              value: { stringValue: '5.x' }
+            }
+          ]
+        },
+        scopeLogs: [
+          {
+            scope: {
+              name: 'dd-proxy-worker',
+              version: '1.0.0'
+            },
+            logRecords: otelLogs
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Forward logs to Firetiger via OTEL HTTP
  */
 async function forwardToFiretiger(logData, endpoint, apiKey, requestId) {
   try {
-    console.log(`[${requestId}] Forwarding to Firetiger: ${endpoint}`);
+    console.log(`[${requestId}] Converting DataDog logs to OTEL format...`);
     
-    // Parse the log data to add metadata
-    let parsedData;
-    try {
-      parsedData = JSON.parse(logData);
-    } catch {
-      parsedData = { raw_log: logData };
-    }
-
-    // Enrich with proxy metadata
-    const enrichedData = {
-      ...parsedData,
-      _proxy: {
-        source: 'dd-proxy-worker',
-        timestamp: new Date().toISOString(),
-        requestId: requestId
-      }
-    };
+    // Convert DataDog format to OpenTelemetry format
+    const otelPayload = convertDataDogToOTEL(logData, requestId);
+    
+    console.log(`[${requestId}] Forwarding to Firetiger OTEL endpoint: ${endpoint}`);
+    console.log(`[${requestId}] OTEL payload preview:`, JSON.stringify(otelPayload, null, 2).substring(0, 500) + '...');
 
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'User-Agent': 'DD-Proxy-Worker/1.0'
+        'User-Agent': 'DD-Proxy-Worker-OTEL/1.0'
       },
-      body: JSON.stringify(enrichedData)
+      body: JSON.stringify(otelPayload)
     });
+
+    const responseText = await response.text();
+    console.log(`[${requestId}] Firetiger OTEL response (${response.status}): ${responseText}`);
 
     return { 
       service: 'firetiger', 
       status: response.status, 
-      success: response.ok 
+      success: response.ok,
+      format: 'otel-http'
     };
 
   } catch (error) {
-    console.error(`[${requestId}] Error forwarding to Firetiger:`, error);
+    console.error(`[${requestId}] Error forwarding to Firetiger via OTEL:`, error);
     return { 
       service: 'firetiger', 
       error: error.message, 
-      success: false 
+      success: false,
+      format: 'otel-http'
     };
   }
 }
