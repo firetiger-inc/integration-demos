@@ -47,21 +47,31 @@ class IntegrationTester {
       throw new Error('DD_CLIENT_TOKEN not configured');
     }
 
-    const logEntry = {
-      ddsource: 'test',
-      ddtags: 'env:test,service:integration-test',
-      message: 'Integration test log entry',
-      level: 'info',
-      timestamp: new Date().toISOString(),
-      testId: `test_${Date.now()}`
+    // Create DataDog Browser SDK compatible payload
+    const logPayload = {
+      logs: [{
+        message: 'Integration test log entry',
+        level: 'info',
+        timestamp: new Date().toISOString(),
+        service: 'integration-test',
+        env: 'test',
+        version: '1.0.0',
+        testId: `test_${Date.now()}`
+      }]
     };
 
-    const response = await fetch(`${WORKER_URL}/v1/input/${DD_CLIENT_TOKEN}`, {
+    // Build ddforward parameter following DataDog proxy spec
+    const ddforwardPath = `/api/v2/logs?ddsource=browser&ddtags=env%3Atest%2Cservice%3Aintegration-test&dd-api-key=${DD_CLIENT_TOKEN}&dd-evp-origin=browser`;
+    const ddforwardEncoded = encodeURIComponent(ddforwardPath);
+
+    const response = await fetch(`${WORKER_URL}?ddforward=${ddforwardEncoded}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Origin': 'https://example.com',
+        'User-Agent': 'Mozilla/5.0 (compatible; Integration-Test/1.0)'
       },
-      body: JSON.stringify(logEntry)
+      body: JSON.stringify(logPayload)
     });
 
     if (!response.ok) {
@@ -69,16 +79,12 @@ class IntegrationTester {
       throw new Error(`Logs proxy failed: ${response.status} - ${errorText}`);
     }
 
-    const result = await response.json();
+    const result = await response.text();
     console.log('  📝 Log proxy result:', result);
-
-    if (!result.success) {
-      throw new Error('Log proxy reported failure');
-    }
   }
 
   async testCORS() {
-    const response = await fetch(`${WORKER_URL}/v1/input/test`, {
+    const response = await fetch(`${WORKER_URL}?ddforward=%2Fapi%2Fv2%2Flogs`, {
       method: 'OPTIONS',
       headers: {
         'Origin': 'https://example.com',
@@ -117,10 +123,13 @@ class IntegrationTester {
   }
 
   async testWithoutClientToken() {
-    const response = await fetch(`${WORKER_URL}/v1/input/invalid-token`, {
+    const ddforwardPath = `/api/v2/logs?dd-api-key=invalid-token`;
+    const ddforwardEncoded = encodeURIComponent(ddforwardPath);
+    
+    const response = await fetch(`${WORKER_URL}?ddforward=${ddforwardEncoded}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'test' })
+      body: JSON.stringify({ logs: [{ message: 'test' }] })
     });
 
     // This should fail at the DataDog level, but worker should still respond

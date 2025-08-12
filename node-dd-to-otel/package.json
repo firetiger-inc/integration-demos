@@ -9,12 +9,11 @@
     "dev": "node --watch src/app.js",
     "demo": "node server.js",
     "demo:dev": "node --watch server.js",
-    "test": "node test-integration.js",
-    "test:server": "node test-server.js",
-    "test:otel": "node test-otel-conversion.js",
-    "install:all": "npm install && cd worker && npm install",
-    "worker:dev": "cd worker && npm run dev",
-    "worker:deploy": "cd worker && npm run deploy"
+    "test": "node tests/test-integration.js",
+    "test:server": "node tests/test-server.js",
+    "test:otel": "node tests/test-otel-conversion.js",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy"
   },
   "dependencies": {
     "@datadog/browser-logs": "^5.24.0",
@@ -32,5 +31,8 @@
     "proxy"
   ],
   "author": "Rustam Lalkaka <rustam@firetiger.com>",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "wrangler": "^4.28.1"
+  }
 }

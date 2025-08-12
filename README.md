@@ -5,7 +5,7 @@ This directory contains demonstration applications showing different ways to sen
 ## Demos
 
 ### [otel-logs/](./otel-logs/)
-Direct OpenTelemetry logs example using the original `telemetry.py` script. Sends structured logs directly to Firetiger via OTLP.
+Direct OpenTelemetry logs example using the `telemetry.py` script. Sends structured logs directly to Firetiger via OTLP.
 
 ### [ddtrace-to-otel/](./ddtrace-to-otel/)
 DDTrace to OpenTelemetry collector example. Shows how to instrument applications with DataDog's `ddtrace` library and forward traces to Firetiger via an OpenTelemetry collector using the DataDog receiver.

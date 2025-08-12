@@ -1,14 +1,10 @@
 name = "ddproxy"
-main = "src/index.js"
+main = "index.js"
 compatibility_date = "2024-01-15"
 compatibility_flags = ["nodejs_compat"]
 
-# Environment variables (populated from .env file)
-[vars]
-ENVIRONMENT = "${WORKER_ENVIRONMENT}"
-DD_FORWARD_ENABLED = "${DD_FORWARD_ENABLED}"
-OTEL_COLLECTOR_ENDPOINT = "${OTEL_COLLECTOR_ENDPOINT}"
-OTEL_COLLECTOR_AUTH = "${OTEL_COLLECTOR_AUTH}"
+# Environment variables will be read from .env when deploying
+# No hardcoded values - all managed via environment variables
 
 # Enable observability for debugging
 [observability]

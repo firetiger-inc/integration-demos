@@ -208,6 +208,7 @@ get_aws_credentials() {
     print_info "Retrieving password from AWS Secrets Manager..."
     FIRETIGER_PASSWORD=$(aws secretsmanager get-secret-value \
         --secret-id "firetiger/ingest/basic-auth@${BUCKET_NAME}" \
+        --region "${AWS_REGION}" \
         --query SecretString --output text 2>/dev/null)
     
     if [[ -z "$FIRETIGER_PASSWORD" ]]; then
@@ -240,7 +241,16 @@ INGEST_ENDPOINT="https://ingest.$(echo $BUCKET_NAME | sed 's/[^a-zA-Z0-9-]/-/g')
 
 print_info "Connection details:"
 echo "OTEL Endpoint: ${INGEST_ENDPOINT}"
-echo "Authorization: Basic ${AUTHORIZATION}"
+echo ""
+echo "Firetiger credentials:"
+echo "Username: ${BUCKET_NAME}"
+echo "Password: ${FIRETIGER_PASSWORD}"
+echo ""
+echo "Basic Auth computation:"
+echo "echo -n \"${BUCKET_NAME}:${FIRETIGER_PASSWORD}\" | base64"
+echo "Result: ${AUTHORIZATION}"
+echo ""
+echo "Authorization Header: Basic ${AUTHORIZATION}"
 
 # Generate OpenTelemetry Collector configuration
 print_info "Generating OpenTelemetry Collector configuration..."
