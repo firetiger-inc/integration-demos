@@ -1,13 +1,30 @@
 # DataDog to OTEL Integration Demo
 
-This demo shows how to proxy DataDog Browser SDK telemetry through a Cloudflare Worker that forwards data to both DataDog and an OpenTelemetry (OTEL) collector.
+This demo consists of two main components that work together to capture and forward telemetry data:
 
-## Architecture
+## Components
+
+### 1. Local Demo Server
+- **Purpose**: Simulates a browser application that generates telemetry events
+- **Technology**: Express.js server with DataDog Browser SDK integration
+- **Features**: Interactive web interface to generate different types of log events
+- **Runs on**: `http://localhost:3000`
+
+### 2. Cloudflare Worker Proxy
+- **Purpose**: Intercepts telemetry data and forwards to multiple destinations
+- **Technology**: Cloudflare Worker that follows DataDog proxy specification
+- **Features**: 
+  - Forwards original data to DataDog (maintains compatibility)
+  - Converts data to OTEL format and sends to collector
+  - Parallel processing for performance
+- **Deployed to**: Cloudflare Workers platform
+
+## Architecture Flow
 
 ```
-Browser App → Cloudflare Worker Proxy → DataDog (original format)
-                    ↓
-              OTEL Collector → Firetiger (OTEL format)
+Local Demo Server (Browser SDK) → Cloudflare Worker Proxy → DataDog (original format)
+                                           ↓
+                                    OTEL Collector → Firetiger (OTEL format)
 ```
 
 ## Setup
@@ -62,29 +79,109 @@ npm run worker:deploy
 
 ## Usage
 
-### Run the Browser Demo
+### Component 1: Local Demo Server
 
-1. **Start the Express server:**
+The Express server provides an interactive web interface to generate telemetry events.
+
+1. **Start the server:**
    ```bash
    npm run demo
    # or
    node server.js
    ```
 
-2. **Open the demo in your browser:**
+2. **Open the demo interface:**
    ```
    http://localhost:3000/demo
    ```
 
-The demo page will show:
-- Current configuration status
-- Buttons to simulate different log events
-- Console output showing telemetry being sent
-- Toggle between direct DataDog mode and proxy mode
+3. **Generate telemetry events:**
+   - Click buttons to simulate different log events (info, warn, error)
+   - View real-time console output
+   - Toggle between direct DataDog mode and proxy mode
+   - Monitor configuration status
 
-## Usage
+### Component 2: Cloudflare Worker Proxy
 
-### Direct DataDog Integration (Node.js App)
+The worker intercepts telemetry from the demo server and forwards to multiple destinations.
+
+**Features:**
+- Receives DataDog Browser SDK requests via `ddforward` parameter
+- Forwards original payload to DataDog (maintains compatibility)
+- Converts to OTEL format and sends to collector
+- Provides health check endpoint at `/health`
+
+**How it works:**
+1. Demo server sends telemetry with `?ddforward=...` parameter
+2. Worker extracts and forwards to DataDog endpoint
+3. Worker converts to OTEL format and sends to collector
+4. Both operations happen in parallel for performance
+
+## Available Scripts
+
+### Demo Server Scripts
+```bash
+npm run demo          # Start demo server (production config)
+npm run demo:dev      # Start demo server with auto-reload (production config)
+npm run demo:staging  # Start demo server (staging config for local development)
+```
+
+### Worker Scripts
+```bash
+npm run worker:dev           # Start worker locally (uses .env.staging)
+npm run worker:deploy        # Deploy worker to production
+```
+
+### Testing Scripts
+```bash
+npm test              # Run integration tests
+npm run test:server   # Test Express server functionality
+npm run test:otel     # Test OTEL conversion logic
+```
+
+## Local Development & Testing
+
+You can test the entire integration locally using staging environment configuration:
+
+### 1. Set up staging environment
+```bash
+# Copy the staging environment template
+cp .env.staging.example .env.staging
+# Edit .env.staging with your actual credentials
+```
+
+### 2. Start the Worker Locally (Terminal 1)
+```bash
+npm run worker:dev
+# Worker runs on http://localhost:8787 using .env.staging config
+```
+
+### 3. Start the Demo Server (Terminal 2)
+```bash
+npm run demo:staging
+# Demo server runs on http://localhost:3000 using .env.staging config
+```
+
+### 4. Test the Integration
+1. Open `http://localhost:3000/demo`
+2. The demo will automatically use the local worker (proxy mode)
+3. Generate telemetry events using the buttons
+4. Check both terminals to see logs from both components
+
+### Environment Configuration
+- **Production**: Uses `.env` with deployed worker endpoint
+- **Staging/Local**: Uses `.env.staging` with `http://localhost:8787`
+- **Wrangler**: Automatically loads `.env.staging` when using `--env staging`
+
+### Local Testing Benefits
+- ✅ Clean separation between production and development configs
+- ✅ No need to deploy worker for testing
+- ✅ See real-time logs from both components
+- ✅ Test OTEL conversion locally
+- ✅ Faster development iteration
+- ✅ Test CORS and proxy functionality
+
+## Testing
 
 The demo app simulates a browser extension that sends logs and metrics to DataDog:
 
@@ -105,25 +202,7 @@ telemetry.sendMetric('button_clicks', 1, {
 });
 ```
 
-### Proxy Mode (via Cloudflare Worker)
-
-Update your application to use the worker endpoint:
-
-```javascript
-// Instead of DataDog directly:
-const logsEndpoint = 'https://browser-http-intake.logs.datadoghq.com/v1/input/TOKEN';
-
-// Use worker proxy:  
-const logsEndpoint = 'https://your-worker.workers.dev/v1/input/TOKEN';
-```
-
-The worker will:
-- ✅ Forward logs to DataDog (maintains existing functionality)
-- ✅ Convert and forward logs to Firetiger in OpenTelemetry format (enables enhanced debugging)  
-- ✅ Process both destinations in parallel for performance
-- ✅ Respect kill switches for operational control
-- ✅ Handle CORS for browser compatibility
-- ✅ Provide request tracing and error handling
+**Note**: The demo interface includes a toggle button to switch between direct DataDog mode and proxy mode - no code changes needed!
 
 ## OpenTelemetry Integration
 

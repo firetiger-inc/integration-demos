@@ -6,7 +6,13 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-config();
+// Load environment-specific .env file
+const env = process.env.NODE_ENV || 'development';
+if (env === 'staging') {
+  config({ path: '.env.staging' });
+} else {
+  config();
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,6 +80,15 @@ app.listen(PORT, () => {
   console.log(`🚀 Demo server running at http://localhost:${PORT}`);
   console.log(`📱 Demo page: http://localhost:${PORT}/demo`);
   console.log(`⚙️  Config API: http://localhost:${PORT}/config`);
+  
+  const proxyEndpoint = process.env.PROXY_ENDPOINT;
+  if (proxyEndpoint) {
+    const isLocal = proxyEndpoint.includes('localhost');
+    const icon = isLocal ? '🏠' : '☁️';
+    console.log(`${icon} Proxy endpoint: ${proxyEndpoint} (${isLocal ? 'local' : 'deployed'})`);
+  } else {
+    console.log('⚠️  Warning: PROXY_ENDPOINT not set');
+  }
   
   if (!process.env.DD_CLIENT_TOKEN) {
     console.log('⚠️  Warning: DD_CLIENT_TOKEN not set - demo will not work');

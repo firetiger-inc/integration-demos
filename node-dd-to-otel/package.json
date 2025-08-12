@@ -9,11 +9,13 @@
     "dev": "node --watch src/app.js",
     "demo": "node server.js",
     "demo:dev": "node --watch server.js",
+    "demo:staging": "NODE_ENV=staging node server.js",
     "test": "node tests/test-integration.js",
     "test:server": "node tests/test-server.js",
     "test:otel": "node tests/test-otel-conversion.js",
-    "worker:dev": "wrangler dev",
-    "worker:deploy": "wrangler deploy"
+    "worker:dev": "wrangler dev --env staging",
+    "worker:deploy": "wrangler deploy",
+    "worker:deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {
     "@datadog/browser-logs": "^5.24.0",
