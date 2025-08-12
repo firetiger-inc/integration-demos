@@ -1,104 +1,86 @@
-# DataDog to OTEL Proxy Integration
+# DataDog to OTEL Integration Demo
 
-This project demonstrates a complete telemetry proxy solution that intercepts DataDog logs and metrics and forwards them to both DataDog and Firetiger (OTEL) for enhanced debugging and analysis.
+This demo shows how to proxy DataDog Browser SDK telemetry through a Cloudflare Worker that forwards data to both DataDog and an OpenTelemetry (OTEL) collector.
 
-## Architecture Overview
+## Architecture
 
 ```
-Extension/Client App  →  Cloudflare Worker Proxy  →  DataDog + Firetiger
-     (logs/metrics)      (intercept & forward)        (dual destination)
+Browser App → Cloudflare Worker Proxy → DataDog (original format)
+                    ↓
+              OTEL Collector → Firetiger (OTEL format)
 ```
 
-### Components
-
-1. **Node.js Demo App** (`src/app.js`) - Simulates browser extension sending telemetry
-2. **Cloudflare Worker Proxy** (`worker/`) - Intercepts and forwards telemetry
-3. **Integration Tests** (`test-integration.js`) - End-to-end testing
-
-## Quick Start
+## Setup
 
 ### 1. Install Dependencies
-```bash
-# Install all dependencies (main project + worker)
-npm run install:all
-```
-
-### 2. Configure Environment
-```bash
-# Copy and configure environment variables
-cp .env.example .env
-
-# Edit .env with your DataDog credentials:
-# DD_CLIENT_TOKEN=your_datadog_client_token
-# DD_APPLICATION_ID=your_datadog_application_id  
-# DD_API_KEY=your_datadog_api_key (optional, for metrics)
-```
-
-### 3. Test the Node.js Demo (Direct to DataDog)
-```bash
-# Run the demo app - sends telemetry directly to DataDog
-npm start
-```
-
-### 4. Run Browser Demo (Recommended)
-```bash
-# Start the demo server with environment variable injection
-npm run demo
-
-# Open browser to http://localhost:3000/demo
-# Interactive demo with DataDog Browser SDK
-```
-
-### 5. Deploy the Cloudflare Worker
-```bash
-# Start local development
-npm run worker:dev
-
-# Or deploy to Cloudflare
-cd worker
-./setup-secrets.sh staging  # Configure secrets
-npm run deploy:staging
-```
-
-### 6. Test with Proxy
-```bash
-# Update .env to use worker as proxy:
-# PROXY_ENDPOINT=https://your-worker.workers.dev/logs
-
-# Test integration
-npm test
-```
-
-## Configuration
-
-### DataDog Setup
-
-1. **Get DataDog RUM Application credentials:**
-   - Go to DataDog → RUM → Applications  
-   - Create or select your application
-   - Copy `Client Token` and `Application ID`
-
-2. **Get DataDog API Key (for metrics):**
-   - Go to DataDog → Organization Settings → API Keys
-   - Create new key or copy existing
-
-### Worker Environment Variables
-
-Configure via `wrangler secret put`:
 
 ```bash
-# Kill switch - enables/disables DataDog forwarding
-wrangler secret put DD_FORWARD_ENABLED --env staging
-# Value: "true" or "false"
-
-# Firetiger endpoint for log forwarding  
-wrangler secret put FIRETIGER_ENDPOINT --env staging
-# Value: "https://your-firetiger-endpoint.com/api/logs"
-
-# Firetiger API authentication
-wrangler secret put FIRETIGER_API_KEY --env staging  
-# Value: "your-firetiger-api-key"
+npm install
 ```
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in the root directory:
+
+```bash
+# DataDog Configuration (for browser demo)
+DD_CLIENT_TOKEN=your_datadog_client_token_here
+DD_SITE=us5.datadoghq.com
+DD_SERVICE=browser-extension
+DD_ENV=staging
+DD_VERSION=1.0.0
+
+# Worker Configuration (for browser demo)
+PROXY_ENDPOINT=https://your-worker-name.your-subdomain.workers.dev
+
+# Worker Environment Variables (for deployment)
+ENVIRONMENT=staging
+DD_FORWARD_ENABLED=true
+OTEL_COLLECTOR_ENDPOINT=https://your-otel-collector-endpoint.com:443
+OTEL_COLLECTOR_AUTH=Basic your_base64_encoded_credentials_here
+```
+
+**Important:** The `.env` file now contains all configuration for both the browser demo and worker deployment. Keep this file secure and never commit it to version control.
+
+### 3. Deploy the Cloudflare Worker
+
+With the flattened structure, everything is in the root directory and wrangler reads from the same `.env` file:
+
+```bash
+# Easy deployment using the provided script
+./deploy-worker.sh
+
+# Or manually:
+npm run worker:deploy
+```
+
+**Worker Environment Variables (from .env file):**
+- `ENVIRONMENT`: Environment name (staging/production)
+- `DD_FORWARD_ENABLED`: Controls DataDog forwarding (kill switch)
+- `OTEL_COLLECTOR_ENDPOINT`: OTEL collector endpoint URL
+- `OTEL_COLLECTOR_AUTH`: Authorization header for OTEL collector
+
+## Usage
+
+### Run the Browser Demo
+
+1. **Start the Express server:**
+   ```bash
+   npm run demo
+   # or
+   node server.js
+   ```
+
+2. **Open the demo in your browser:**
+   ```
+   http://localhost:3000/demo
+   ```
+
+The demo page will show:
+- Current configuration status
+- Buttons to simulate different log events
+- Console output showing telemetry being sent
+- Toggle between direct DataDog mode and proxy mode
 
 ## Usage
 
@@ -187,16 +169,14 @@ curl -X POST https://your-worker.workers.dev/v1/input/YOUR_TOKEN \\
 ### Worker Deployment
 
 ```bash
-cd worker
+# Deploy the worker
+npm run worker:deploy
 
-# Deploy to staging
-npm run deploy:staging
-
-# Deploy to production  
-npm run deploy:production
+# Or use the deployment script
+./deploy-worker.sh
 
 # Monitor logs
-npm run tail:production
+wrangler tail
 ```
 
 ### Gradual Rollout Strategy

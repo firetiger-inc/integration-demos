@@ -3,20 +3,16 @@ main = "src/index.js"
 compatibility_date = "2024-01-15"
 compatibility_flags = ["nodejs_compat"]
 
+# Environment variables (populated from .env file)
+[vars]
+ENVIRONMENT = "${WORKER_ENVIRONMENT}"
+DD_FORWARD_ENABLED = "${DD_FORWARD_ENABLED}"
+OTEL_COLLECTOR_ENDPOINT = "${OTEL_COLLECTOR_ENDPOINT}"
+OTEL_COLLECTOR_AUTH = "${OTEL_COLLECTOR_AUTH}"
+
 # Enable observability for debugging
 [observability]
 enabled = true
 head_sampling_rate = 1 # optional. default = 1.
 
 # Worker will be available at ddproxy.rustaml.workers.dev automatically
-
-[env.production]
-vars = { ENVIRONMENT = "production" }
-
-[env.staging]  
-vars = { ENVIRONMENT = "staging" }
-
-# Environment variables to be set via wrangler secret
-# wrangler secret put DD_FORWARD_ENABLED
-# wrangler secret put FIRETIGER_ENDPOINT  
-# wrangler secret put FIRETIGER_API_KEY

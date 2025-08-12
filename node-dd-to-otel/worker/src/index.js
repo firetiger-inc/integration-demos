@@ -38,7 +38,7 @@ export default {
         worker: 'ddproxy.rustaml.workers.dev',
         config: {
           dd_forward_enabled: env.DD_FORWARD_ENABLED !== 'false',
-          firetiger_configured: !!(env.FIRETIGER_ENDPOINT && env.FIRETIGER_API_KEY)
+          otel_collector_configured: !!(env.OTEL_COLLECTOR_ENDPOINT && env.OTEL_COLLECTOR_AUTH)
         }
       };
       console.log('Health check requested:', healthData);
@@ -146,12 +146,12 @@ async function handleDataDogProxy(request, env, ctx, ddforward) {
       })
     );
 
-    // 2. Forward to Firetiger (if configured)
-    if (env.FIRETIGER_ENDPOINT && env.FIRETIGER_API_KEY) {
-      const firetiger = forwardToFiretiger(body, env.FIRETIGER_ENDPOINT, env.FIRETIGER_API_KEY, requestId);
-      promises.push(firetiger);
+    // 2. Forward to OTEL Collector (if configured)
+    if (env.OTEL_COLLECTOR_ENDPOINT && env.OTEL_COLLECTOR_AUTH) {
+      const otelCollector = forwardToOTELCollector(body, env.OTEL_COLLECTOR_ENDPOINT, env.OTEL_COLLECTOR_AUTH, requestId);
+      promises.push(otelCollector);
     } else {
-      console.log(`[${requestId}] Firetiger endpoint not configured`);
+      console.log(`[${requestId}] OTEL Collector endpoint not configured`);
     }
 
     // Wait for all requests to complete
@@ -419,42 +419,45 @@ function convertDataDogToOTEL(datadogPayload, requestId) {
 }
 
 /**
- * Forward logs to Firetiger via OTEL HTTP
+ * Forward logs to OTEL Collector
  */
-async function forwardToFiretiger(logData, endpoint, apiKey, requestId) {
+async function forwardToOTELCollector(logData, endpoint, authHeader, requestId) {
   try {
     console.log(`[${requestId}] Converting DataDog logs to OTEL format...`);
     
     // Convert DataDog format to OpenTelemetry format
     const otelPayload = convertDataDogToOTEL(logData, requestId);
     
-    console.log(`[${requestId}] Forwarding to Firetiger OTEL endpoint: ${endpoint}`);
+    // Ensure we're sending to the OTLP logs receiver endpoint
+    const otlpEndpoint = endpoint.endsWith('/v1/logs') ? endpoint : `${endpoint}/v1/logs`;
+    
+    console.log(`[${requestId}] Forwarding to OTEL Collector endpoint: ${otlpEndpoint}`);
     console.log(`[${requestId}] OTEL payload preview:`, JSON.stringify(otelPayload, null, 2).substring(0, 500) + '...');
 
-    const response = await fetch(endpoint, {
+    const response = await fetch(otlpEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'User-Agent': 'DD-Proxy-Worker-OTEL/1.0'
+        'User-Agent': 'opentelemetry-collector-ddtrace-demo',
+        'Authorization': authHeader
       },
       body: JSON.stringify(otelPayload)
     });
 
     const responseText = await response.text();
-    console.log(`[${requestId}] Firetiger OTEL response (${response.status}): ${responseText}`);
+    console.log(`[${requestId}] OTEL Collector response (${response.status}): ${responseText}`);
 
     return { 
-      service: 'firetiger', 
+      service: 'otel-collector', 
       status: response.status, 
       success: response.ok,
       format: 'otel-http'
     };
 
   } catch (error) {
-    console.error(`[${requestId}] Error forwarding to Firetiger via OTEL:`, error);
+    console.error(`[${requestId}] Error forwarding to OTEL Collector:`, error);
     return { 
-      service: 'firetiger', 
+      service: 'otel-collector', 
       error: error.message, 
       success: false,
       format: 'otel-http'
