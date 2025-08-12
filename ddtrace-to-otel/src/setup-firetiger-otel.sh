@@ -3,7 +3,7 @@
 # Setup script for Firetiger OpenTelemetry Collector
 # This script gets Firetiger connection details and generates the OTel collector config
 
-set -e
+set -eo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -125,11 +125,8 @@ get_gcp_credentials() {
     print_info "Checking gcloud authentication..."
     if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null | head -n1 | grep -q "@"; then
         print_warning "No active gcloud authentication found"
-        print_info "Running: gcloud auth login"
-        gcloud auth login
-        
-        print_info "Also refreshing Application Default Credentials..."
-        gcloud auth application-default login
+        print_info "Running: gcloud auth login --update-adc"
+        gcloud auth login --update-adc
     fi
     
     # Verify project access
@@ -248,9 +245,7 @@ echo "Authorization: Basic ${AUTHORIZATION}"
 # Generate OpenTelemetry Collector configuration
 print_info "Generating OpenTelemetry Collector configuration..."
 
-# Create generated directory if it doesn't exist
 mkdir -p ../generated
-
 cat > ../generated/otel-config.yaml << EOF
 receivers:
   # Receive traces from DDTrace on port 8126 (DataDog agent port)
@@ -330,63 +325,9 @@ EOF
 
 print_info "Environment configuration written to: ../generated/.env"
 
-# Generate startup script
-print_info "Generating startup script..."
-
-cat > ../generated/start-demo.sh << 'EOF'
-#!/bin/bash
-
-# Start the DDTrace + OpenTelemetry demo
-
-set -e
-
-print_info() {
-    echo -e "\033[0;32m[INFO]\033[0m $1"
-}
-
-print_error() {
-    echo -e "\033[0;31m[ERROR]\033[0m $1"
-}
-
-# Check if otel-config.yaml exists
-if [[ ! -f "../generated/otel-config.yaml" ]]; then
-    print_error "../generated/otel-config.yaml not found. Run ../src/setup-firetiger-otel.sh first."
-    exit 1
-fi
-
-# Check if OpenTelemetry Collector is available
-if ! command -v otelcol-contrib &> /dev/null; then
-    print_error "OpenTelemetry Collector (otelcol-contrib) is not installed"
-    print_error "Install it from: https://github.com/open-telemetry/opentelemetry-collector-releases/releases"
-    exit 1
-fi
-
-print_info "Starting OpenTelemetry Collector..."
-otelcol-contrib --config=../generated/otel-config.yaml &
-OTEL_PID=$!
-
-# Wait for collector to start
-sleep 3
-
-print_info "Starting DDTrace application..."
-print_info "DDTrace will send traces to localhost:8126 where OTel collector is listening"
-ddtrace-run python3 ../src/ddtrace_app.py --requests 50 --workers 3 --interval 200ms --users 20
-
-print_info "Demo completed. Stopping OpenTelemetry Collector..."
-kill $OTEL_PID
-
-print_info "Demo finished successfully!"
-EOF
-
-chmod +x ../generated/start-demo.sh
-
-print_info "Startup script written to: ../generated/start-demo.sh"
-
 print_info ""
 print_info "Setup complete! To run the demo:"
-print_info "1. Install OpenTelemetry Collector: https://github.com/open-telemetry/opentelemetry-collector-releases/releases"
-print_info "2. Install Python dependencies: pip install -r requirements.txt"
-print_info "3. Run the demo: cd ../generated && ./start-demo.sh"
+print_info "1. Run with Docker: docker compose up"
 print_info ""
 print_info "How it works:"
 print_info "- DDTrace app sends traces to localhost:8126 (DataDog agent port)"
@@ -394,4 +335,17 @@ print_info "- OpenTelemetry collector DataDog receiver listens on port 8126"
 print_info "- Collector converts DD traces to OpenTelemetry format"
 print_info "- Collector forwards traces to Firetiger via OTLP"
 print_info ""
+
+# Add Grafana password access info based on platform
+if [[ "$PLATFORM" == "gcp" && -n "$PROJECT_ID" ]]; then
+    print_info "To access Grafana dashboard:"
+    print_info "  gcloud secrets versions access latest --secret $BUCKET_NAME-grafana-admin-password --project $PROJECT_ID"
+elif [[ "$PLATFORM" == "aws" && -n "$ACCOUNT_ID" ]]; then
+    print_info "To access Grafana dashboard:"
+    print_info "  # First assume the cross-account role:"
+    print_info "  aws sts assume-role --role-arn arn:aws:iam::${ACCOUNT_ID}:role/CrossAccountAccessForFiretiger --role-session-name grafana-access"
+    print_info "  # Then get the Grafana password:"
+    print_info "  aws secretsmanager get-secret-value --secret-id firetiger/grafana/admin-password@${BUCKET_NAME} --query SecretString --output text"
+fi
+
 print_warning "Note: Keep your credentials secure and do not commit .env to version control"
