@@ -14,7 +14,7 @@
     "test:server": "node tests/test-server.js",
     "test:otel": "node tests/test-otel-conversion.js",
     "worker:dev": "wrangler dev --env staging",
-    "worker:deploy": "wrangler deploy",
+    "worker:deploy": "wrangler deploy --env=\"\"",
     "worker:deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {

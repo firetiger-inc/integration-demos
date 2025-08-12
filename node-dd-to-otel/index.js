@@ -22,6 +22,9 @@ const DD_INTAKE_ORIGINS = {
 
 export default {
   async fetch(request, env, ctx) {
+    // Debug: Log environment variables
+    console.log('Environment variables:', JSON.stringify(env, null, 2));
+    
     // Handle CORS preflight requests
     if (request.method === 'OPTIONS') {
       return handleCORS();

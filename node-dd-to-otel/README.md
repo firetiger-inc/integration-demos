@@ -61,17 +61,31 @@ OTEL_COLLECTOR_AUTH=Basic your_base64_encoded_credentials_here
 
 ### 3. Deploy the Cloudflare Worker
 
-With the flattened structure, everything is in the root directory and wrangler reads from the same `.env` file:
+The deployment script automatically reads your `.env` file and sets the necessary secrets:
 
 ```bash
-# Easy deployment using the provided script
+# Deploy using the automated script (recommended)
 ./deploy-worker.sh
+```
 
-# Or manually:
+**What the script does:**
+1. Loads variables from `.env` file
+2. Sets them as Cloudflare Worker secrets using `wrangler secret put`
+3. Deploys the worker to production
+
+**Manual deployment** (if you prefer to manage secrets separately):
+```bash
+# Set secrets manually
+echo "value" | wrangler secret put ENVIRONMENT
+echo "value" | wrangler secret put DD_FORWARD_ENABLED  
+echo "value" | wrangler secret put OTEL_COLLECTOR_ENDPOINT
+echo "value" | wrangler secret put OTEL_COLLECTOR_AUTH
+
+# Then deploy
 npm run worker:deploy
 ```
 
-**Worker Environment Variables (from .env file):**
+**Worker Environment Variables** (set as Cloudflare secrets):
 - `ENVIRONMENT`: Environment name (staging/production)
 - `DD_FORWARD_ENABLED`: Controls DataDog forwarding (kill switch)
 - `OTEL_COLLECTOR_ENDPOINT`: OTEL collector endpoint URL
