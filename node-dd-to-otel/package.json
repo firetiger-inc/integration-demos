@@ -35,6 +35,6 @@
   "author": "Rustam Lalkaka <rustam@firetiger.com>",
   "license": "ISC",
   "devDependencies": {
-    "wrangler": "^4.59.1"
+    "wrangler": "^4.75.0"
   }
 }
